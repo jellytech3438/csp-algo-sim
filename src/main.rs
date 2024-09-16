@@ -29,7 +29,7 @@ pub struct Model {
     layout: MyLayout,
     padding: f32,
     minbox: f32,
-    step: f32, // multiselectMode: bool
+    step: f32, 
 }
 
 impl Model {
@@ -47,15 +47,16 @@ impl Model {
         //     self.solver.add_constraint(c).unwrap();
         // }
 
-        match self
-            .layout
-            .insert_with_constraint(&node, insertway, self.padding, &mut self.solver)
-        {
-            Some(ref c) => {
-                self.solver.add_constraints(c).unwrap();
-            }
-            None => {}
-        }
+        self.layout.insert_with_constraint(&node, insertway, self.padding, &mut self.solver);
+        // match self
+        //     .layout
+        //     .insert_with_constraint(&node, insertway, self.padding, &mut self.solver)
+        // {
+        //     Some(ref c) => {
+        //         self.solver.add_constraints(c).unwrap();
+        //     }
+        //     None => {}
+        // }
 
         // layout constraints
         self.rm_layout_constraint();
@@ -158,14 +159,18 @@ impl Model {
             InsertionWay::HORI => self.layout.first_layout_height(self.padding),
         };
 
-        match self.layout.direc {
-            InsertionWay::HORI => {
-                vert_expression = vert_expression + 2.0 * self.padding.to_f64();
-            }
-            InsertionWay::VERT => {
-                hori_expression = hori_expression + 2.0 * self.padding.to_f64();
-            }
-        }
+        hori_expression = hori_expression + 2.0 * self.padding.to_f64();
+        vert_expression = vert_expression + 2.0 * self.padding.to_f64();
+        
+        // match self.layout.direc {
+        //     InsertionWay::HORI => {
+        //         vert_expression = vert_expression + 2.0 * self.padding.to_f64();
+        //     }
+        //     InsertionWay::VERT => {
+        //         hori_expression = hori_expression + 2.0 * self.padding.to_f64();
+        //         vert_expression = vert_expression + 2.0 * self.padding.to_f64();
+        //     }
+        // }
 
         let mut vert_constraint = Constraint::new(
             vert_expression - self.window_width,
@@ -177,9 +182,6 @@ impl Model {
             RelationalOperator::Equal,
             REQUIRED,
         );
-
-        // println!("vert: {:?}", vert_constraint);
-        // println!("hori: {:?}", hori_constraint);
 
         constraints.push(&vert_constraint);
         constraints.push(&hori_constraint);

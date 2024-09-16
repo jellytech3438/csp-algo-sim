@@ -7,7 +7,7 @@ use nannou::Draw;
 use nannou_egui::egui::math::Numeric;
 use nannou_egui::egui::plot::Points;
 use nannou_egui::egui::Key;
-use std::borrow::BorrowMut;
+use std::borrow::{Borrow, BorrowMut};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::{
@@ -72,12 +72,12 @@ impl MyLayout {
         insertway: InsertionWay,
         padding: f32,
         solver: &mut Solver,
-    ) -> Option<Vec<Constraint>> {
+    ) {
         if self.nodes.len() == 0 {
             self.nodes
                 .push(Rc::new(RefCell::new(LayoutVecType::Node(node.clone()))));
             self.direc = insertway;
-            return None;
+            return;
         }
 
         // can not call inside loop
@@ -139,23 +139,27 @@ impl MyLayout {
                         println!("insert finish, len = {}", self.nodes.len());
                         let mut fixed_side_constraint = match self.direc {
                             InsertionWay::HORI => Constraint::new(
-                                first_width - node.rect.width(),
+                                first_width.clone() - node.rect.width(),
                                 cassowary::RelationalOperator::Equal,
                                 REQUIRED,
                             ),
                             InsertionWay::VERT => Constraint::new(
-                                first_height - node.rect.height(),
+                                first_height.clone() - node.rect.height(),
                                 cassowary::RelationalOperator::Equal,
                                 REQUIRED,
                             ),
                         };
+                        // push to constr to store all same lever fixed side constraint
                         if i == self.nodes.len() - 2 {
                             self.constr.push(fixed_side_constraint.clone());
+                            println!("insert:last in {:?}", self.constr);
                         } else {
-                            self.constr.insert(i + 1, fixed_side_constraint.clone());
+                            self.constr.insert(i, fixed_side_constraint.clone());
+                            println!("insert:{} in {:?}", i, self.constr);
                         }
-                        // solver.add_constraint(fixed_side_constraint);
-                        return Some(Vec::from([fixed_side_constraint]));
+
+                        solver.add_constraint(fixed_side_constraint).unwrap();
+                        return;
                     }
 
                     // if selected and direction not same
@@ -172,6 +176,7 @@ impl MyLayout {
                 }
                 LayoutVecType::Layout(ref mut l) => {
                     l.insert_with_constraint(node, insertway, padding, solver);
+                    return;
                 }
             }
         }
@@ -181,11 +186,6 @@ impl MyLayout {
             terms: Vec::new(),
             constant: 0.0,
         };
-        let mut new_layout_width = None;
-        // let mut new_layout_width = Expression {
-        //     terms: Vec::new(),
-        //     constant: 0.0,
-        // };
         // replace with layout:
         // |N|N|N|N| -> press H at position 2 for example
         //
@@ -207,8 +207,11 @@ impl MyLayout {
                 .nodes
                 .push(Rc::new(RefCell::new(self_.to_owned())));
             new_layout.select_first();
-            solver.remove_constraint(&self.constr[target]).unwrap();
-            self.constr.remove(target);
+            solver.remove_constraint(&self.constr[target - 1]).unwrap();
+            // replace instead of remove
+            // so we don;t remove it but replace it by idx latter
+            //
+            // self.constr.remove(target);
             match insertway {
                 InsertionWay::VERT => {
                     // new_layout_height =
@@ -216,8 +219,7 @@ impl MyLayout {
                     // new_layout_width = new_layout.first_layout_width(padding);
                 }
                 InsertionWay::HORI => {
-                    new_layout_width =
-                        new_layout.insert_with_constraint(node, insertway, padding, solver);
+                    new_layout.insert_with_constraint(node, insertway, padding, solver);
                     new_layout_height = new_layout.first_layout_height(padding);
                 }
             }
@@ -228,27 +230,19 @@ impl MyLayout {
             // all nodes should be reconstraint
         } else {
             // origin constraint in constr should be replace
-            let mut new_layout_constraints = Vec::new();
+            // this is vert to hori
+            // we still need to match direction arm
             let mut new_layout_height_constraint = Constraint::new(
                 first_height - new_layout_height.clone(),
                 cassowary::RelationalOperator::Equal,
-                REQUIRED,
+                STRONG,
             );
 
-            self.constr
-                .insert(target, new_layout_height_constraint.clone());
-            new_layout_constraints.push(new_layout_height_constraint.clone());
-
-            match new_layout_width {
-                Some(ref mut c) => {
-                    new_layout_constraints.append(c);
-                }
-                None => {}
-            };
-
-            return Some(new_layout_constraints);
+            self.constr[target - 1] = new_layout_height_constraint.clone();
+            solver
+                .add_constraint(new_layout_height_constraint.clone())
+                .unwrap();
         }
-        None
     }
     pub fn remove(&mut self, minbox: f32, solver: &mut Solver) -> bool {
         let mut target = 0;
@@ -579,14 +573,14 @@ impl MyLayout {
                                 return true;
                             }
                             if has_parent && self.selected != (self.nodes.len() - 1) as i32 {
-                                self.selected -= 1;
+                                self.selected += 1;
                                 return false;
                             }
                             if !has_parent && self.selected == (self.nodes.len() - 1) as i32 {
                                 return false;
                             }
                             if !has_parent && self.selected != (self.nodes.len() - 1) as i32 {
-                                self.selected -= 1;
+                                self.selected += 1;
                                 return false;
                             }
                         }
@@ -613,14 +607,14 @@ impl MyLayout {
                                 return true;
                             }
                             if has_parent && self.selected != (self.nodes.len() - 1) as i32 {
-                                self.selected -= 1;
+                                self.selected += 1;
                                 return false;
                             }
                             if !has_parent && self.selected == (self.nodes.len() - 1) as i32 {
                                 return false;
                             }
                             if !has_parent && self.selected != (self.nodes.len() - 1) as i32 {
-                                self.selected -= 1;
+                                self.selected += 1;
                                 return false;
                             }
                         }
@@ -649,153 +643,6 @@ impl MyLayout {
         false
     }
 
-    // pub fn select(&mut self, key: Key, select_first: bool) {
-    //     match self.direc {
-    //         InsertionWay::HORI => match key {
-    //             Key::ArrowDown => {
-    //                 let mut next_set_true = false;
-    //                 for mut i in 0..self.nodes.len() {
-    //                     match *self.nodes[i].as_ref().borrow_mut() {
-    //                         LayoutVecType::Node(ref mut n) => {
-    //                             if i == 0 && select_first {
-    //                                 n.selected = true;
-    //                                 return;
-    //                             }
-    //                             if next_set_true {
-    //                                 n.selected = true;
-    //                                 return;
-    //                             }
-    //                             if n.selected {
-    //                                 n.selected = false;
-    //                                 next_set_true = true;
-    //                                 if i == self.nodes.len() - 1 {
-    //                                     n.selected = true;
-    //                                 }
-    //                             }
-    //                         }
-    //                         LayoutVecType::Layout(ref mut l) => {
-    //                             if i == 0 && select_first {
-    //                                 l.select(key, select_first);
-    //                                 return;
-    //                             }
-    //                             if next_set_true {
-    //                                 l.select(key, true);
-    //                                 return;
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //             Key::ArrowUp => {
-    //                 let mut next_set_true = false;
-    //                 for mut i in (0..self.nodes.len()).rev() {
-    //                     match *self.nodes[i].as_ref().borrow_mut() {
-    //                         LayoutVecType::Node(ref mut n) => {
-    //                             if i == self.nodes.len() - 1 && select_first {
-    //                                 n.selected = true;
-    //                                 return;
-    //                             }
-    //                             if next_set_true {
-    //                                 n.selected = true;
-    //                                 return;
-    //                             }
-    //                             if n.selected {
-    //                                 n.selected = false;
-    //                                 next_set_true = true;
-    //                                 if i == 0 {
-    //                                     n.selected = true;
-    //                                 }
-    //                             }
-    //                         }
-    //                         LayoutVecType::Layout(ref mut l) => {
-    //                             if i == self.nodes.len() - 1 && select_first {
-    //                                 l.select(key, select_first);
-    //                                 return;
-    //                             }
-    //                             if next_set_true {
-    //                                 l.select(key, true);
-    //                                 return;
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //             _ => {}
-    //         },
-    //         InsertionWay::VERT => match key {
-    //             Key::ArrowRight => {
-    //                 let mut next_set_true = false;
-    //                 for mut i in 0..self.nodes.len() {
-    //                     match *self.nodes[i].as_ref().borrow_mut() {
-    //                         LayoutVecType::Node(ref mut n) => {
-    //                             if i == 0 && select_first {
-    //                                 n.selected = true;
-    //                                 return;
-    //                             }
-    //                             if next_set_true {
-    //                                 n.selected = true;
-    //                                 return;
-    //                             }
-    //                             if n.selected {
-    //                                 n.selected = false;
-    //                                 next_set_true = true;
-    //                                 if i == self.nodes.len() - 1 {
-    //                                     n.selected = true;
-    //                                 }
-    //                             }
-    //                         }
-    //                         LayoutVecType::Layout(ref mut l) => {
-    //                             if i == 0 && select_first {
-    //                                 l.select(key, select_first);
-    //                                 return;
-    //                             }
-    //                             if next_set_true {
-    //                                 l.select(key, true);
-    //                                 return;
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //             Key::ArrowLeft => {
-    //                 let mut next_set_true = false;
-    //                 for mut i in (0..self.nodes.len()).rev() {
-    //                     match *self.nodes[i].as_ref().borrow_mut() {
-    //                         LayoutVecType::Node(ref mut n) => {
-    //                             if i == self.nodes.len() - 1 && select_first {
-    //                                 n.selected = true;
-    //                                 return;
-    //                             }
-    //                             if next_set_true {
-    //                                 n.selected = true;
-    //                                 return;
-    //                             }
-    //                             if n.selected {
-    //                                 n.selected = false;
-    //                                 next_set_true = true;
-    //                                 if i == 0 {
-    //                                     n.selected = true;
-    //                                 }
-    //                             }
-    //                         }
-    //                         LayoutVecType::Layout(ref mut l) => {
-    //                             if i == self.nodes.len() - 1 && select_first {
-    //                                 l.select(key, select_first);
-    //                                 return;
-    //                             }
-    //                             if next_set_true {
-    //                                 l.select(key, true);
-    //                                 return;
-    //                             }
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //             _ => {}
-    //         },
-    //     }
-    // }
-
     pub fn print(&self, solver: &Solver) {
         println!("insertway: {:?}", self.direc);
         for i in 0..self.nodes.len() {
@@ -821,9 +668,8 @@ impl MyLayout {
         mut window: &Rect,
         padding: f32,
     ) -> Rect {
-        let mut wh = Vec2::new(0.0, 0.0);
-        let mut xy = Vec2::new(0.0, 0.0);
-        let old_reference = reference.clone();
+        let mut top_left = Vec2::new(0.0, 0.0);
+        let mut bottom_right = Vec2::new(0.0, 0.0);
         for i in 0..self.nodes.len() {
             match *self.nodes[i].as_ref().borrow() {
                 LayoutVecType::Node(ref n) => {
@@ -836,38 +682,25 @@ impl MyLayout {
 
                     if reference == *window {
                         rect = rect.top_left_of(reference);
-                        xy = rect.xy();
+                        top_left = rect.top_left();
                     } else {
                         match self.direc {
                             InsertionWay::VERT => {
-                                // rect = rect.top_left_of(reference);
                                 rect = rect.right_of(reference).shift_x(padding);
-                                wh.x += rect.w();
-                                wh.y = rect.h();
-                                xy.x += rect.w() / 2.;
                             }
                             InsertionWay::HORI => {
-                                // rect = rect.top_left_of(reference);
-                                rect = rect.below(reference).shift_y(-padding);
-                                wh.x = rect.w();
-                                wh.y += rect.h();
-                                xy.y += rect.h() / 2.;
+                                rect = rect
+                                    .bottom_left_of(reference)
+                                    .shift_y(-(rect.h() + padding));
                             }
                         }
                     }
 
-                    reference = rect.clone();
+                    if i == self.nodes.len() - 1 {
+                        bottom_right = rect.bottom_right();
+                    }
 
-                    // reference = match self.direc {
-                    //     InsertionWay::VERT => {
-                    //         Rect::from_corners(rect.top_right(), window.bottom_right())
-                    //             .pad_left(padding)
-                    //     }
-                    //     InsertionWay::HORI => {
-                    //         Rect::from_corners(rect.bottom_left(), window.bottom_right())
-                    //             .pad_top(padding)
-                    //     }
-                    // };
+                    reference = rect.clone();
 
                     if i as i32 == self.selected {
                         draw.rect().wh(rect.wh()).xy(rect.xy()).color(RED);
@@ -881,11 +714,15 @@ impl MyLayout {
                             true => *window,
                             false => {
                                 Rect::from_corners(reference.bottom_left(), window.bottom_right())
-                                    .shift_y(padding)
+                                    .shift_y(-padding)
                             }
                         };
                         reference = l.draw(draw, solver, new_window, &new_window, padding);
-                        // println!("{:?}", reference);
+                        if i == 0 {
+                            top_left = reference.top_left();
+                        } else if i == self.nodes.len() - 1 {
+                            bottom_right = reference.bottom_right();
+                        }
                     }
                     InsertionWay::VERT => {
                         let mut new_window = match (reference == *window) {
@@ -896,12 +733,16 @@ impl MyLayout {
                             }
                         };
                         reference = l.draw(draw, solver, new_window, &new_window, padding);
-                        // println!("{:?}", reference);
+                        if i == 0 {
+                            top_left = reference.top_left();
+                        } else if i == self.nodes.len() - 1 {
+                            bottom_right = reference.bottom_right();
+                        }
                     }
                 },
             }
         }
-        let mut full_layout_rect = Rect::from_xy_wh(wh, xy);
+        let mut full_layout_rect = Rect::from_corners(top_left, bottom_right);
         full_layout_rect
     }
 }
