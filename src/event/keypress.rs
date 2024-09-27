@@ -30,15 +30,15 @@ pub fn key_pressed(app: &App, model: &mut Model, key: Key) {
         }
         Key::Up => {
             model.borrow_mut().select(nannou_egui::egui::Key::ArrowUp);
-            println!("select right");
+            println!("select up");
         }
         Key::Down => {
             model.borrow_mut().select(nannou_egui::egui::Key::ArrowDown);
-            println!("select right");
+            println!("select down");
         }
         Key::Left => {
             model.borrow_mut().select(nannou_egui::egui::Key::ArrowLeft);
-            println!("select right");
+            println!("select left");
         }
         Key::Right => {
             model

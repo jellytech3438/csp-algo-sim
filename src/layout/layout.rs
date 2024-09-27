@@ -126,58 +126,66 @@ impl MyLayout {
             self.direc = insertway;
         }
 
-        for i in 0..self.nodes.len() {
-            match *self.nodes.to_owned()[i].as_ref().borrow_mut() {
-                LayoutVecType::Node(ref n) => {
-                    // if selected and direction same
-                    // insert directly
-                    if i as i32 == self.selected && self.direc == insertway {
-                        self.nodes.insert(
-                            i + 1,
-                            Rc::new(RefCell::new(LayoutVecType::Node(node.clone()))),
-                        );
-                        println!("insert finish, len = {}", self.nodes.len());
-                        let mut fixed_side_constraint = match self.direc {
-                            InsertionWay::HORI => Constraint::new(
-                                first_width.clone() - node.rect.width(),
-                                cassowary::RelationalOperator::Equal,
-                                REQUIRED,
-                            ),
-                            InsertionWay::VERT => Constraint::new(
-                                first_height.clone() - node.rect.height(),
-                                cassowary::RelationalOperator::Equal,
-                                REQUIRED,
-                            ),
-                        };
-                        // push to constr to store all same lever fixed side constraint
-                        if i == self.nodes.len() - 2 {
-                            self.constr.push(fixed_side_constraint.clone());
-                            println!("insert:last in {:?}", self.constr);
-                        } else {
-                            self.constr.insert(i, fixed_side_constraint.clone());
-                            println!("insert:{} in {:?}", i, self.constr);
-                        }
+        if self.selected == -1 {
+            println!("index error self.selected = -1");
+            return;
+        }
 
-                        solver.add_constraint(fixed_side_constraint).unwrap();
-                        return;
+        match *self.nodes.to_owned()[self.selected as usize]
+            .as_ref()
+            .borrow_mut()
+        {
+            LayoutVecType::Node(ref n) => {
+                println!("node, current select: {}", self.selected);
+                // if selected and direction same
+                // insert directly
+                if self.direc == insertway {
+                    self.nodes.insert(
+                        self.selected as usize + 1,
+                        Rc::new(RefCell::new(LayoutVecType::Node(node.clone()))),
+                    );
+                    println!("insert finish, len = {}", self.nodes.len());
+                    let mut fixed_side_constraint = match self.direc {
+                        InsertionWay::HORI => Constraint::new(
+                            first_width.clone() - node.rect.width(),
+                            cassowary::RelationalOperator::Equal,
+                            REQUIRED,
+                        ),
+                        InsertionWay::VERT => Constraint::new(
+                            first_height.clone() - node.rect.height(),
+                            cassowary::RelationalOperator::Equal,
+                            REQUIRED,
+                        ),
+                    };
+                    // push to constr to store all same lever fixed side constraint
+                    if self.selected as usize == self.nodes.len() - 2 {
+                        self.constr.push(fixed_side_constraint.clone());
+                        println!("insert:last in {:?}", self.constr);
+                    } else {
+                        self.constr
+                            .insert(self.selected as usize, fixed_side_constraint.clone());
+                        println!("insert:{} in {:?}", self.selected as usize, self.constr);
                     }
 
-                    // if selected and direction not same
-                    // do the following
-                    // 1. mark the index
-                    // 2. create new layout
-                    // 3. insert origin as reference
-                    // 4. insert new node
-                    if i as i32 == self.selected && self.direc != insertway {
-                        target = i;
-                        println!("change dir finish, len = {}", self.nodes.len());
-                        break;
-                    }
-                }
-                LayoutVecType::Layout(ref mut l) => {
-                    l.insert_with_constraint(node, insertway, padding, solver);
+                    solver.add_constraint(fixed_side_constraint).unwrap();
                     return;
                 }
+
+                // if selected and direction not same
+                // do the following
+                // 1. mark the index
+                // 2. create new layout
+                // 3. insert origin as reference
+                // 4. insert new node
+                if self.direc != insertway {
+                    target = self.selected as usize;
+                    println!("change dir finish, len = {}", self.nodes.len());
+                }
+            }
+            LayoutVecType::Layout(ref mut l) => {
+                println!("layout");
+                l.insert_with_constraint(node, insertway, padding, solver);
+                return;
             }
         }
 
@@ -186,6 +194,54 @@ impl MyLayout {
             terms: Vec::new(),
             constant: 0.0,
         };
+
+        // all nodes should be reconstraint
+        if target == 0 {
+            self.nodes.get(target).unwrap().replace_with(|self_| {
+                new_layout
+                    .nodes
+                    .push(Rc::new(RefCell::new(self_.to_owned())));
+                new_layout.select_first();
+
+                // remove all constr
+                for i in 0..self.constr.len() {
+                    solver.remove_constraint(&self.constr[i]).unwrap();
+                }
+
+                match insertway {
+                    InsertionWay::VERT => {
+                        // new_layout_height =
+                        //     new_layout.insert_with_constraint(node, insertway, padding, solver);
+                        // new_layout_width = new_layout.first_layout_width(padding);
+                    }
+                    InsertionWay::HORI => {
+                        new_layout.insert_with_constraint(node, insertway, padding, solver);
+                        new_layout_height = new_layout.first_layout_height(padding);
+                    }
+                }
+
+                // add all constr
+                for i in 1..self.nodes.len() {
+                    let mut i_node_layout_new_expression = match *self.nodes[i].as_ref().borrow() {
+                        LayoutVecType::Node(ref n) => n.rect.height(),
+                        LayoutVecType::Layout(ref l) => l.first_layout_height(padding),
+                    };
+                    let mut i_node_layout_new_constraint = Constraint::new(
+                        new_layout_height.clone() - i_node_layout_new_expression,
+                        cassowary::RelationalOperator::Equal,
+                        STRONG,
+                    );
+                    self.constr[i - 1] = i_node_layout_new_constraint.clone();
+                    solver.add_constraint(i_node_layout_new_constraint).unwrap();
+                }
+                println!("constr len {}", self.constr.len());
+
+                LayoutVecType::Layout(new_layout)
+            });
+
+            return;
+        }
+
         // replace with layout:
         // |N|N|N|N| -> press H at position 2 for example
         //
@@ -202,16 +258,17 @@ impl MyLayout {
         //
         // use 2. to match vertical layout's width constraint
         //
+        println!("target: {}", target);
         self.nodes.get(target).unwrap().replace_with(|self_| {
             new_layout
                 .nodes
                 .push(Rc::new(RefCell::new(self_.to_owned())));
             new_layout.select_first();
-            solver.remove_constraint(&self.constr[target - 1]).unwrap();
+
             // replace instead of remove
-            // so we don;t remove it but replace it by idx latter
-            //
-            // self.constr.remove(target);
+            // so we don't remove it but replace it by idx latter
+
+            solver.remove_constraint(&self.constr[target - 1]).unwrap();
             match insertway {
                 InsertionWay::VERT => {
                     // new_layout_height =
@@ -226,23 +283,20 @@ impl MyLayout {
 
             LayoutVecType::Layout(new_layout)
         });
-        if target == 0 {
-            // all nodes should be reconstraint
-        } else {
-            // origin constraint in constr should be replace
-            // this is vert to hori
-            // we still need to match direction arm
-            let mut new_layout_height_constraint = Constraint::new(
-                first_height - new_layout_height.clone(),
-                cassowary::RelationalOperator::Equal,
-                STRONG,
-            );
+        // origin constraint in constr should be replace
+        // this is vert to hori
+        // we still need to match direction arm
+        let mut new_layout_height_constraint = Constraint::new(
+            first_height - new_layout_height.clone(),
+            cassowary::RelationalOperator::Equal,
+            STRONG,
+        );
 
-            self.constr[target - 1] = new_layout_height_constraint.clone();
-            solver
-                .add_constraint(new_layout_height_constraint.clone())
-                .unwrap();
-        }
+        self.constr[target - 1] = new_layout_height_constraint.clone();
+        solver
+            .add_constraint(new_layout_height_constraint.clone())
+            .unwrap();
+        return;
     }
     pub fn remove(&mut self, minbox: f32, solver: &mut Solver) -> bool {
         let mut target = 0;
@@ -430,116 +484,27 @@ impl MyLayout {
             return false;
         }
 
-        match *self.nodes[self.selected as usize].as_ref().borrow_mut() {
-            LayoutVecType::Node(ref n) => match (self.direc, key) {
-                (InsertionWay::VERT, Key::ArrowUp) => {
-                    if has_parent {
-                        self.selected = -1;
-                        return true;
-                    }
-                    return false;
-                }
-                (InsertionWay::VERT, Key::ArrowDown) => {
-                    if has_parent {
-                        self.selected = -1;
-                        return true;
-                    }
-                    return false;
-                }
-                (InsertionWay::VERT, Key::ArrowLeft) => {
-                    if has_parent && self.selected == 0 {
-                        self.selected = -1;
-                        return true;
-                    }
-                    if has_parent && self.selected != 0 {
-                        self.selected -= 1;
+        println!(
+            "insertwat: {:?} ,len: {} ,select: {}",
+            self.direc,
+            self.nodes.len(),
+            self.selected
+        );
+        let mut finish = false;
+        let mut prev_node = false;
+
+        while !finish {
+            match *self.nodes[self.selected as usize].as_ref().borrow_mut() {
+                LayoutVecType::Node(ref n) => {
+                    if prev_node {
                         return false;
                     }
-                    if !has_parent && self.selected == 0 {
-                        return false;
-                    }
-                    if !has_parent && self.selected != 0 {
-                        self.selected -= 1;
-                        return false;
-                    }
-                }
-                (InsertionWay::VERT, Key::ArrowRight) => {
-                    if has_parent && self.selected == (self.nodes.len() - 1) as i32 {
-                        self.selected = -1;
-                        return true;
-                    }
-                    if has_parent && self.selected != (self.nodes.len() - 1) as i32 {
-                        self.selected += 1;
-                        return false;
-                    }
-                    if !has_parent && self.selected == (self.nodes.len() - 1) as i32 {
-                        return false;
-                    }
-                    if !has_parent && self.selected != (self.nodes.len() - 1) as i32 {
-                        self.selected += 1;
-                        return false;
-                    }
-                }
-                (InsertionWay::HORI, Key::ArrowUp) => {
-                    if has_parent && self.selected == 0 {
-                        self.selected = -1;
-                        return true;
-                    }
-                    if has_parent && self.selected != 0 {
-                        self.selected -= 1;
-                        return false;
-                    }
-                    if !has_parent && self.selected == 0 {
-                        return false;
-                    }
-                    if !has_parent && self.selected != 0 {
-                        self.selected -= 1;
-                        return false;
-                    }
-                }
-                (InsertionWay::HORI, Key::ArrowDown) => {
-                    if has_parent && self.selected == (self.nodes.len() - 1) as i32 {
-                        self.selected = -1;
-                        return true;
-                    }
-                    if has_parent && self.selected != (self.nodes.len() - 1) as i32 {
-                        self.selected += 1;
-                        return false;
-                    }
-                    if !has_parent && self.selected == (self.nodes.len() - 1) as i32 {
-                        return false;
-                    }
-                    if !has_parent && self.selected != (self.nodes.len() - 1) as i32 {
-                        self.selected += 1;
-                        return false;
-                    }
-                }
-                (InsertionWay::HORI, Key::ArrowLeft) => {
-                    if has_parent {
-                        self.selected = -1;
-                        return true;
-                    }
-                    return false;
-                }
-                (InsertionWay::HORI, Key::ArrowRight) => {
-                    if has_parent {
-                        self.selected = -1;
-                        return true;
-                    }
-                    return false;
-                }
-                _ => {}
-            },
-            LayoutVecType::Layout(ref mut l) => {
-                let dir_change_parent_level = l.select(key, true);
-                if dir_change_parent_level {
                     match (self.direc, key) {
                         (InsertionWay::VERT, Key::ArrowUp) => {
                             if has_parent {
                                 self.selected = -1;
                                 return true;
                             }
-                            l.select_first();
                             return false;
                         }
                         (InsertionWay::VERT, Key::ArrowDown) => {
@@ -547,7 +512,6 @@ impl MyLayout {
                                 self.selected = -1;
                                 return true;
                             }
-                            l.select_first();
                             return false;
                         }
                         (InsertionWay::VERT, Key::ArrowLeft) => {
@@ -557,14 +521,16 @@ impl MyLayout {
                             }
                             if has_parent && self.selected != 0 {
                                 self.selected -= 1;
-                                return false;
+                                prev_node = true;
+                                continue;
                             }
                             if !has_parent && self.selected == 0 {
                                 return false;
                             }
                             if !has_parent && self.selected != 0 {
                                 self.selected -= 1;
-                                return false;
+                                prev_node = true;
+                                continue;
                             }
                         }
                         (InsertionWay::VERT, Key::ArrowRight) => {
@@ -574,14 +540,16 @@ impl MyLayout {
                             }
                             if has_parent && self.selected != (self.nodes.len() - 1) as i32 {
                                 self.selected += 1;
-                                return false;
+                                prev_node = true;
+                                continue;
                             }
                             if !has_parent && self.selected == (self.nodes.len() - 1) as i32 {
                                 return false;
                             }
                             if !has_parent && self.selected != (self.nodes.len() - 1) as i32 {
                                 self.selected += 1;
-                                return false;
+                                prev_node = true;
+                                continue;
                             }
                         }
                         (InsertionWay::HORI, Key::ArrowUp) => {
@@ -591,14 +559,16 @@ impl MyLayout {
                             }
                             if has_parent && self.selected != 0 {
                                 self.selected -= 1;
-                                return false;
+                                prev_node = true;
+                                continue;
                             }
                             if !has_parent && self.selected == 0 {
                                 return false;
                             }
                             if !has_parent && self.selected != 0 {
                                 self.selected -= 1;
-                                return false;
+                                prev_node = true;
+                                continue;
                             }
                         }
                         (InsertionWay::HORI, Key::ArrowDown) => {
@@ -608,14 +578,16 @@ impl MyLayout {
                             }
                             if has_parent && self.selected != (self.nodes.len() - 1) as i32 {
                                 self.selected += 1;
-                                return false;
+                                prev_node = true;
+                                continue;
                             }
                             if !has_parent && self.selected == (self.nodes.len() - 1) as i32 {
                                 return false;
                             }
                             if !has_parent && self.selected != (self.nodes.len() - 1) as i32 {
                                 self.selected += 1;
-                                return false;
+                                prev_node = true;
+                                continue;
                             }
                         }
                         (InsertionWay::HORI, Key::ArrowLeft) => {
@@ -623,7 +595,6 @@ impl MyLayout {
                                 self.selected = -1;
                                 return true;
                             }
-                            l.select_first();
                             return false;
                         }
                         (InsertionWay::HORI, Key::ArrowRight) => {
@@ -631,10 +602,135 @@ impl MyLayout {
                                 self.selected = -1;
                                 return true;
                             }
-                            l.select_first();
                             return false;
                         }
                         _ => {}
+                    }
+                }
+                LayoutVecType::Layout(ref mut l) => {
+                    if prev_node {
+                        l.select_first();
+                        return false;
+                    }
+                    let dir_change_parent_level = l.select(key, true);
+                    if dir_change_parent_level {
+                        match (self.direc, key) {
+                            (InsertionWay::VERT, Key::ArrowUp) => {
+                                if has_parent {
+                                    self.selected = -1;
+                                    return true;
+                                }
+                                l.select_first();
+                                return false;
+                            }
+                            (InsertionWay::VERT, Key::ArrowDown) => {
+                                if has_parent {
+                                    self.selected = -1;
+                                    return true;
+                                }
+                                l.select_first();
+                                return false;
+                            }
+                            (InsertionWay::VERT, Key::ArrowLeft) => {
+                                if has_parent && self.selected == 0 {
+                                    self.selected = -1;
+                                    return true;
+                                }
+                                if has_parent && self.selected != 0 {
+                                    self.selected -= 1;
+                                    prev_node = true;
+                                    continue;
+                                }
+                                if !has_parent && self.selected == 0 {
+                                    prev_node = true;
+                                    continue;
+                                }
+                                if !has_parent && self.selected != 0 {
+                                    self.selected -= 1;
+                                    prev_node = true;
+                                    continue;
+                                }
+                            }
+                            (InsertionWay::VERT, Key::ArrowRight) => {
+                                if has_parent && self.selected == (self.nodes.len() - 1) as i32 {
+                                    self.selected = -1;
+                                    return true;
+                                }
+                                if has_parent && self.selected != (self.nodes.len() - 1) as i32 {
+                                    self.selected += 1;
+                                    prev_node = true;
+                                    continue;
+                                }
+                                if !has_parent && self.selected == (self.nodes.len() - 1) as i32 {
+                                    prev_node = true;
+                                    continue;
+                                }
+                                if !has_parent && self.selected != (self.nodes.len() - 1) as i32 {
+                                    self.selected += 1;
+                                    prev_node = true;
+                                    continue;
+                                }
+                            }
+                            (InsertionWay::HORI, Key::ArrowUp) => {
+                                if has_parent && self.selected == 0 {
+                                    self.selected = -1;
+                                    return true;
+                                }
+                                if has_parent && self.selected != 0 {
+                                    self.selected -= 1;
+                                    prev_node = true;
+                                    continue;
+                                }
+                                if !has_parent && self.selected == 0 {
+                                    prev_node = true;
+                                    continue;
+                                }
+                                if !has_parent && self.selected != 0 {
+                                    self.selected -= 1;
+                                    prev_node = true;
+                                    continue;
+                                }
+                            }
+                            (InsertionWay::HORI, Key::ArrowDown) => {
+                                if has_parent && self.selected == (self.nodes.len() - 1) as i32 {
+                                    self.selected = -1;
+                                    return true;
+                                }
+                                if has_parent && self.selected != (self.nodes.len() - 1) as i32 {
+                                    self.selected += 1;
+                                    prev_node = true;
+                                    continue;
+                                }
+                                if !has_parent && self.selected == (self.nodes.len() - 1) as i32 {
+                                    prev_node = true;
+                                    continue;
+                                }
+                                if !has_parent && self.selected != (self.nodes.len() - 1) as i32 {
+                                    self.selected += 1;
+                                    prev_node = true;
+                                    continue;
+                                }
+                            }
+                            (InsertionWay::HORI, Key::ArrowLeft) => {
+                                if has_parent {
+                                    self.selected = -1;
+                                    return true;
+                                }
+                                l.select_first();
+                                return false;
+                            }
+                            (InsertionWay::HORI, Key::ArrowRight) => {
+                                if has_parent {
+                                    self.selected = -1;
+                                    return true;
+                                }
+                                l.select_first();
+                                return false;
+                            }
+                            _ => {}
+                        }
+                    } else {
+                        finish = true;
                     }
                 }
             }

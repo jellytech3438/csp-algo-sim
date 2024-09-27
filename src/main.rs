@@ -29,7 +29,7 @@ pub struct Model {
     layout: MyLayout,
     padding: f32,
     minbox: f32,
-    step: f32, 
+    step: f32,
 }
 
 impl Model {
@@ -47,7 +47,8 @@ impl Model {
         //     self.solver.add_constraint(c).unwrap();
         // }
 
-        self.layout.insert_with_constraint(&node, insertway, self.padding, &mut self.solver);
+        self.layout
+            .insert_with_constraint(&node, insertway, self.padding, &mut self.solver);
         // match self
         //     .layout
         //     .insert_with_constraint(&node, insertway, self.padding, &mut self.solver)
@@ -161,7 +162,7 @@ impl Model {
 
         hori_expression = hori_expression + 2.0 * self.padding.to_f64();
         vert_expression = vert_expression + 2.0 * self.padding.to_f64();
-        
+
         // match self.layout.direc {
         //     InsertionWay::HORI => {
         //         vert_expression = vert_expression + 2.0 * self.padding.to_f64();
@@ -249,7 +250,7 @@ fn model(app: &App) -> Model {
         window_height: window_height,
         solver: solver,
         layout: MyLayout::new(InsertionWay::VERT),
-        minbox: 20.0,
+        minbox: 70.0,
         padding: 10.0,
         step: 50.0,
     };
