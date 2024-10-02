@@ -88,36 +88,12 @@ impl MyLayout {
 
         // change direction if node len = 1
         // and the insertionway changes
-        // if self.nodes.len() == 1 {
-        //     self.nodes
-        //         .push(Rc::new(RefCell::new(LayoutVecType::Node(node.clone()))));
-        //     self.direc = insertway;
+
+        // push and remove as index
         //
-        //     // fixed side means for:
-        //     // insertway = vert ==> all node's height should be same
-        //     // insertway = hori ==> all node's width should be same
-        //     let mut fixed_side_constraints = match self.direc {
-        //         InsertionWay::HORI => Constraint::new(
-        //             first_width - node.rect.width(),
-        //             cassowary::RelationalOperator::Equal,
-        //             REQUIRED,
-        //         ),
-        //         InsertionWay::VERT => Constraint::new(
-        //             first_height - node.rect.height(),
-        //             cassowary::RelationalOperator::Equal,
-        //             REQUIRED,
-        //         ),
-        //     };
-        //     // push and remove as index
-        //     //
-        //     //  |N|N|N|L|N|L|N|
-        //     //   ^ 0 1   2   3
-        //     //   reference
-        //     self.constr.insert(1, fixed_side_constraints.clone());
-        //     // solver.add_constraint(fixed_side_constraints);
-        //     // return;
-        //     return Some(fixed_side_constraints);
-        // }
+        //  |N|N|N|L|N|L|N|
+        //   ^ 0 1   2   3
+        //   reference
 
         let mut target = 0;
         let mut found_target = false;
@@ -145,6 +121,8 @@ impl MyLayout {
                         Rc::new(RefCell::new(LayoutVecType::Node(node.clone()))),
                     );
                     println!("insert finish, len = {}", self.nodes.len());
+                    // insertway = vert ==> all node's height should be same
+                    // insertway = hori ==> all node's width should be same
                     let mut fixed_side_constraint = match self.direc {
                         InsertionWay::HORI => Constraint::new(
                             first_width.clone() - node.rect.width(),
@@ -185,12 +163,105 @@ impl MyLayout {
             LayoutVecType::Layout(ref mut l) => {
                 println!("layout");
                 l.insert_with_constraint(node, insertway, padding, solver);
+                // deal with parent constrinat
+
+                // early break with parent layout re-constriantint
+                // this piece of code are similar to section in line 271 start from line 277
+                if self.selected == 0 {
+                    for i in 0..self.constr.len() {
+                        solver.remove_constraint(&self.constr[i]).unwrap();
+                    }
+
+                    match insertway {
+                        InsertionWay::VERT => {
+                            let new_layout_width = l.first_layout_width(padding);
+
+                            // add all constr
+                            for i in 1..self.nodes.len() {
+                                let mut i_node_layout_new_expression = match *self.nodes[i]
+                                    .as_ref()
+                                    .borrow()
+                                {
+                                    LayoutVecType::Node(ref n) => n.rect.width(),
+                                    LayoutVecType::Layout(ref l) => l.first_layout_width(padding),
+                                };
+                                let mut i_node_layout_new_constraint = Constraint::new(
+                                    new_layout_width.clone() - i_node_layout_new_expression,
+                                    cassowary::RelationalOperator::Equal,
+                                    STRONG,
+                                );
+                                self.constr[i - 1] = i_node_layout_new_constraint.clone();
+                                solver.add_constraint(i_node_layout_new_constraint).unwrap();
+                            }
+                        }
+                        InsertionWay::HORI => {
+                            let new_layout_height = l.first_layout_height(padding);
+
+                            // add all constr
+                            for i in 1..self.nodes.len() {
+                                let mut i_node_layout_new_expression = match *self.nodes[i]
+                                    .as_ref()
+                                    .borrow()
+                                {
+                                    LayoutVecType::Node(ref n) => n.rect.height(),
+                                    LayoutVecType::Layout(ref l) => l.first_layout_height(padding),
+                                };
+                                let mut i_node_layout_new_constraint = Constraint::new(
+                                    new_layout_height.clone() - i_node_layout_new_expression,
+                                    cassowary::RelationalOperator::Equal,
+                                    STRONG,
+                                );
+                                self.constr[i - 1] = i_node_layout_new_constraint.clone();
+                                solver.add_constraint(i_node_layout_new_constraint).unwrap();
+                            }
+                        }
+                    }
+                    return;
+                }
+
+                solver
+                    .remove_constraint(&self.constr[(self.selected - 1) as usize])
+                    .unwrap();
+
+                match self.direc {
+                    InsertionWay::HORI => {
+                        let mut new_layout_width = l.first_layout_width(padding);
+                        let mut new_layout_width_constraint = Constraint::new(
+                            first_width - new_layout_width.clone(),
+                            cassowary::RelationalOperator::Equal,
+                            STRONG,
+                        );
+                        self.constr[(self.selected - 1) as usize] =
+                            new_layout_width_constraint.clone();
+                        solver
+                            .add_constraint(new_layout_width_constraint.clone())
+                            .unwrap();
+                    }
+                    InsertionWay::VERT => {
+                        let mut new_layout_height = l.first_layout_height(padding);
+                        let mut new_layout_height_constraint = Constraint::new(
+                            first_height - new_layout_height.clone(),
+                            cassowary::RelationalOperator::Equal,
+                            STRONG,
+                        );
+                        self.constr[(self.selected - 1) as usize] =
+                            new_layout_height_constraint.clone();
+                        solver
+                            .add_constraint(new_layout_height_constraint.clone())
+                            .unwrap();
+                    }
+                }
+
                 return;
             }
         }
 
         let mut new_layout = MyLayout::new(insertway);
         let mut new_layout_height = Expression {
+            terms: Vec::new(),
+            constant: 0.0,
+        };
+        let mut new_layout_width = Expression {
             terms: Vec::new(),
             constant: 0.0,
         };
@@ -210,32 +281,48 @@ impl MyLayout {
 
                 match insertway {
                     InsertionWay::VERT => {
-                        // new_layout_height =
-                        //     new_layout.insert_with_constraint(node, insertway, padding, solver);
-                        // new_layout_width = new_layout.first_layout_width(padding);
+                        new_layout.insert_with_constraint(node, insertway, padding, solver);
+                        new_layout_width = new_layout.first_layout_width(padding);
+
+                        // add all constr
+                        for i in 1..self.nodes.len() {
+                            let mut i_node_layout_new_expression =
+                                match *self.nodes[i].as_ref().borrow() {
+                                    LayoutVecType::Node(ref n) => n.rect.width(),
+                                    LayoutVecType::Layout(ref l) => l.first_layout_width(padding),
+                                };
+                            let mut i_node_layout_new_constraint = Constraint::new(
+                                new_layout_width.clone() - i_node_layout_new_expression,
+                                cassowary::RelationalOperator::Equal,
+                                STRONG,
+                            );
+                            self.constr[i - 1] = i_node_layout_new_constraint.clone();
+                            solver.add_constraint(i_node_layout_new_constraint).unwrap();
+                        }
                     }
                     InsertionWay::HORI => {
                         new_layout.insert_with_constraint(node, insertway, padding, solver);
                         new_layout_height = new_layout.first_layout_height(padding);
+
+                        // add all constr
+                        for i in 1..self.nodes.len() {
+                            let mut i_node_layout_new_expression =
+                                match *self.nodes[i].as_ref().borrow() {
+                                    LayoutVecType::Node(ref n) => n.rect.height(),
+                                    LayoutVecType::Layout(ref l) => l.first_layout_height(padding),
+                                };
+                            let mut i_node_layout_new_constraint = Constraint::new(
+                                new_layout_height.clone() - i_node_layout_new_expression,
+                                cassowary::RelationalOperator::Equal,
+                                STRONG,
+                            );
+                            self.constr[i - 1] = i_node_layout_new_constraint.clone();
+                            solver.add_constraint(i_node_layout_new_constraint).unwrap();
+                        }
                     }
                 }
 
-                // add all constr
-                for i in 1..self.nodes.len() {
-                    let mut i_node_layout_new_expression = match *self.nodes[i].as_ref().borrow() {
-                        LayoutVecType::Node(ref n) => n.rect.height(),
-                        LayoutVecType::Layout(ref l) => l.first_layout_height(padding),
-                    };
-                    let mut i_node_layout_new_constraint = Constraint::new(
-                        new_layout_height.clone() - i_node_layout_new_expression,
-                        cassowary::RelationalOperator::Equal,
-                        STRONG,
-                    );
-                    self.constr[i - 1] = i_node_layout_new_constraint.clone();
-                    solver.add_constraint(i_node_layout_new_constraint).unwrap();
-                }
                 println!("constr len {}", self.constr.len());
-
                 LayoutVecType::Layout(new_layout)
             });
 
@@ -271,9 +358,8 @@ impl MyLayout {
             solver.remove_constraint(&self.constr[target - 1]).unwrap();
             match insertway {
                 InsertionWay::VERT => {
-                    // new_layout_height =
-                    //     new_layout.insert_with_constraint(node, insertway, padding, solver);
-                    // new_layout_width = new_layout.first_layout_width(padding);
+                    new_layout.insert_with_constraint(node, insertway, padding, solver);
+                    new_layout_width = new_layout.first_layout_width(padding);
                 }
                 InsertionWay::HORI => {
                     new_layout.insert_with_constraint(node, insertway, padding, solver);
@@ -286,16 +372,34 @@ impl MyLayout {
         // origin constraint in constr should be replace
         // this is vert to hori
         // we still need to match direction arm
-        let mut new_layout_height_constraint = Constraint::new(
-            first_height - new_layout_height.clone(),
-            cassowary::RelationalOperator::Equal,
-            STRONG,
-        );
 
-        self.constr[target - 1] = new_layout_height_constraint.clone();
-        solver
-            .add_constraint(new_layout_height_constraint.clone())
-            .unwrap();
+        match insertway {
+            InsertionWay::VERT => {
+                let mut new_layout_width_constraint = Constraint::new(
+                    first_width - new_layout_width.clone(),
+                    cassowary::RelationalOperator::Equal,
+                    STRONG,
+                );
+
+                self.constr[target - 1] = new_layout_width_constraint.clone();
+                solver
+                    .add_constraint(new_layout_width_constraint.clone())
+                    .unwrap();
+            }
+            InsertionWay::HORI => {
+                let mut new_layout_height_constraint = Constraint::new(
+                    first_height - new_layout_height.clone(),
+                    cassowary::RelationalOperator::Equal,
+                    STRONG,
+                );
+
+                self.constr[target - 1] = new_layout_height_constraint.clone();
+                solver
+                    .add_constraint(new_layout_height_constraint.clone())
+                    .unwrap();
+            }
+        }
+
         return;
     }
     pub fn remove(&mut self, minbox: f32, solver: &mut Solver) -> bool {
